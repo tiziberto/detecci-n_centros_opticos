@@ -189,13 +189,25 @@ pip install opencv-python numpy
 ```
 
 ```bash
-python3 Detector/Detector_v1.7.py                          # menú de videos, con ventana
-python3 Detector/Detector_v1.7.py video.mp4                # un video
-python3 Detector/Detector_v1.7.py --todos                  # todos, sin ventana
-python3 Detector/Detector_v1.7.py video.mp4 --csv out.csv  # exporta los centros
+python3 Detector/Detector_v1.7.py                            # menú de videos, con ventana
+python3 Detector/Detector_v1.7.py video.mp4                  # un video, con ventana
+python3 Detector/Detector_v1.7.py video.mp4 --sin-ventana    # un video, sin ventana
+python3 Detector/Detector_v1.7.py --todos                    # todos, sin ventana
+python3 Detector/Detector_v1.7.py video.mp4 --csv out.csv    # exporta los centros
 python3 Detector/Detector_v1.7.py video.mp4 --grabar out.mp4
 python3 Detector/Detector_v1.7.py --carpeta "otra/carpeta" --todos
 ```
+
+`--sin-ventana` no figura en el encabezado del archivo. Es la opción que hace
+falta para cronometrar un video suelto o para llamar al detector desde un
+script.
+
+### Reproducibilidad
+
+El detector es determinista: volver a correr los videos 172332, 173527 y 174058
+produjo CSV idénticos byte a byte a los de `Detector/salida/`. Velocidad medida
+con reloj de pared: de 62 a 100 cuadros por segundo según el video, es decir
+entre 2,1 y 3,3 veces más rápido que tiempo real.
 
 Controles en modo ventana: `q`/`ESC` salir, `ESPACIO` pausa, `r` re-adquirir,
 `n`/`p` video siguiente y anterior, `+`/`-` velocidad, `0` velocidad original,
