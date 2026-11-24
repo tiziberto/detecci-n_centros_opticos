@@ -1,341 +1,238 @@
-# 🔴 Detección de Centros Ópticos de LEDs
+# Detección de Centros Ópticos
 
-Sistema de visión por computadora para detectar y rastrear LEDs en tiempo real utilizando OpenCV y Filtro de Kalman.
+Visión por computadora para medir, cuadro a cuadro y con precisión subpíxel,
+la posición de los centros ópticos de los LEDs de un módulo lineal en video.
 
----
+Es un problema de **metrología**, no de detección: no alcanza con decir "hay un
+LED por acá". Hay que devolver una coordenada estable, con el mismo índice
+físico en todos los cuadros, y saber cuánto vale esa coordenada.
 
-## 📁 Estructura del Proyecto
-
-```
-Deteccion Centros Opticos/
-├── Detector/
-│   ├── Detector_v1.0.py          # Detección híbrida básica (Parpadeo + HSV)
-│   ├── Detector_v1.1.py          # Fusión de métodos + filtro circularidad
-│   ├── Detector_v1.2.py          # Memoria persistente de última posición
-│   ├── Detector_v1.3.py          # Kalman + zoom dinámico + controles interactivos
-│   └── Detector_v1.4.py          # Versión final optimizada con Kalman
-│
-└── Generador de videos/
-    ├── generador.py              # Script para generar videos de prueba
-    ├── simulacion_leds_30fps.mp4
-    ├── simulacion_leds_60fps.mp4
-    ├── simulacion_leds_120fps.mp4
-    ├── simulacion_leds_parpadeo.mp4
-    ├── simulacion_leds_fondo_dinamico.mp4
-    ├── simulacion_leds_fondo_suave.mp4
-    ├── simulacion_leds_ciclo_3on3off.mp4
-    ├── simulacion_leds_violeta_1hz.mp4
-    ├── simulacion_leds_violeta_15hz.mp4
-    ├── simulacion_leds_vision.mp4
-    └── video_real.mp4
-```
+El proyecto pasó por ocho versiones y dos objetos distintos. Lo que terminó
+gobernando el diseño fue un detalle físico: **los LEDs parpadean a 15 Hz y la
+cámara filma a 30,012 fps**, es decir, el parpadeo cae exactamente sobre la
+frecuencia de Nyquist.
 
 ---
 
-## ⚙️ Requisitos
+## Resultados de la versión 1.7
 
-### Dependencias
+Medidos sobre nueve videos reales de 1440 × 1440 a 30,012 fps, 4 440 cuadros,
+147,9 segundos de material, con el módulo cruzando el encuadre completo.
+
+| Métrica | Valor |
+|---|---|
+| Cobertura (cuadros con los 6 centros) | **93,6 %** |
+| Cobertura por video | 80,7 % a 100 % |
+| Repetibilidad (ruido de medición) | **0,13 px** mediana, 0,26 px p95 |
+| Desvío respecto de la fila ideal equiespaciada | 0,27 px RMS |
+| Diferencia sistemática entre regímenes | **0,90 px** (ver más abajo) |
+| Cuadros sin solución (el detector se abstiene) | 6,4 % |
+
+### Cómo se resolvió cada cuadro
+
+| Estado | Vía | Cuadros | % |
+|---|---|---|---|
+| `LED` | Blobs saturados + RANSAC | 2 937 | 66,1 % |
+| `BAR` | Búsqueda local | 1 041 | 23,4 % |
+| `MOD` | Forma del módulo | 154 | 3,5 % |
+| `ACQ` | Adquisición | 26 | 0,6 % |
+| `COAST` | Sin medición, sostiene la pose | 239 | 5,4 % |
+| `LOST` | Sin solución | 43 | 1,0 % |
+
+### Por video
+
+| Video | Cuadros | Segundos | Cobertura | Espaciado | Movimiento |
+|---|---|---|---|---|---|
+| 172332 | 329 | 11,0 | 100,0 % | 32,0 px | 0,8 px/cuadro |
+| 172546 | 368 | 12,3 | 100,0 % | 32,4 px | 27,3 |
+| 172649 | 324 | 10,8 | 88,9 % | 32,0 px | 1,1 |
+| 172729 | 445 | 14,8 | 92,1 % | 32,3 px | 18,0 |
+| 173420 | 482 | 16,1 | 99,4 % | 31,8 px | 0,2 |
+| 173527 | 589 | 19,6 | 98,5 % | 32,8 px | 32,5 |
+| 173649 | 509 | 17,0 | 99,0 % | 31,1 px | 41,0 |
+| 173754 | 553 | 18,4 | 94,2 % | 27,1 px | 37,6 |
+| 174058 | 841 | 28,0 | 80,7 % | 24,5 px | 20,9 |
+
+---
+
+## El problema de los 15 Hz
+
+La frecuencia de Nyquist de una cámara de 30,012 fps es 15,006 Hz. El parpadeo
+medido en los videos es de 15,01 Hz. El parpadeo cae **sobre** Nyquist, así que
+lo que se captura deja de depender de la señal y pasa a depender de la fase
+entre el obturador y el parpadeo. Como los dos relojes no están sincronizados,
+la fase deriva y el régimen cambia a lo largo de cada video.
+
+Hay dos regímenes, y los dos aparecen:
+
+- **Encendido.** Los LEDs saturan y el halo inunda los huecos. El contraste
+  lente/hueco cae a 37. Las seis manchas se funden entre sí.
+- **Atenuado.** Los LEDs siguen emitiendo pero mucho más débil: la lente queda
+  en 95 a 226 niveles de gris contra una barra en 17. El contraste sube a 200.
+  **No se apagan del todo**, y este régimen es fotométricamente el más limpio.
+
+Además, una minoría de cuadros cae justo sobre la conmutación y, por el
+obturador rodante, el módulo queda partido dentro del mismo cuadro: parte de
+las lentes encendidas y parte apagadas.
+
+El 23,4 % de los cuadros se resolvió en el régimen atenuado. Sin tratarlo
+explícitamente, la cobertura caería aproximadamente a la mitad.
+
+---
+
+## Cómo funciona la versión 1.7
+
+Los 6 centros se modelan como un cuerpo rígido de **4 grados de libertad**, no
+como 12 incógnitas independientes:
+
+```
+p_i = c + (i - 2,5) · s · u(θ)        i = 0 … 5
+```
+
+con `c` el centro, `s` el espaciado y `θ` el ángulo. Reparametrizado como
+`p_k = c + k·d` el ajuste es lineal y se resuelve por mínimos cuadrados en una
+sola operación.
+
+Cada cuadro se mide por tres vías independientes, todas pasan por el mismo
+refinamiento y la misma validación, y se adopta la de mayor contraste que sea
+consistente con el seguimiento:
+
+| Vía | Método | Cuándo sirve | Estado |
+|---|---|---|---|
+| A | Blobs saturados a varios umbrales + RANSAC de fila equiespaciada | LEDs encendidos y separados | `LED` |
+| B | Forma del módulo por momentos centrales, sobre el cuadro reducido 4× | Encendidos y atenuados | `MOD` |
+| C | Búsqueda local en rejilla, con escala y ángulo casi congelados | Requiere seguimiento previo | `BAR` |
+
+Las vías A y B son **mediciones globales sin información previa**: son las que
+impiden que el modelo derive. La vía C es la barata y resuelve la mayoría de
+los cuadros atenuados.
+
+Sobre la medición elegida:
+
+1. **Refinamiento**: centroide ponderado por intensidad en cada lente, con
+   umbral relativo al fondo local y corrección acotada al 6 % del espaciado.
+2. **Ajuste**: mínimos cuadrados lineales de los 4 GDL.
+3. **Validación**: contraste lente/hueco, colinealidad, uniformidad de
+   espaciado y escala dentro de rango.
+
+Si la validación no pasa, el detector **se abstiene** en vez de devolver una
+posición mala. Para una aplicación de medición, un dato malo sin marcar es peor
+que no tener dato.
+
+---
+
+## Nivel de certeza
+
+Lo que está medido, y cómo:
+
+- **Repetibilidad, 0,13 px.** En cinco tramos casi inmóviles (300 cuadros) se
+  quitó el movimiento real con un polinomio de grado 3 por coordenada; el
+  residuo es ruido de medición. σ = 0,116 px a lo largo de la fila y 0,097 px
+  perpendicular.
+- **El supuesto de equiespaciado es válido a 0,27 px.** Se promediaron hasta
+  200 cuadros llevados a una pose canónica usando sólo el centro y el ángulo
+  (nunca el espaciado), y sobre la imagen apilada se midieron los 6 centros con
+  centroide ponderado, sin modelo de fila y sin tope. El desvío respecto de la
+  fila ideal es 0,27 px RMS, 0,47 px máximo.
+- **El espaciado coincide con la medición independiente a 0,03 px.**
+- **Hay un sesgo sistemático de 0,90 px entre los dos regímenes.** Medido por
+  tripletas encendido-atenuado-encendido, que cancelan el movimiento suave
+  hasta segundo orden, con control de signo invertido: +0,77 px a lo largo de
+  la fila, +0,47 px perpendicular y +0,40 px de espaciado (medianas, n = 602,
+  intervalos de confianza del 95 % por bootstrap más angostos que 0,02 px).
+
+**Lo que no está verificado:** la exactitud absoluta. No hay en el proyecto un
+patrón calibrado ni un conjunto etiquetado. El encabezado del código declara un
+error medio de 0,24 px contra 216 centros etiquetados a mano, pero ese archivo
+no está, así que esa cifra no es reproducible. El sesgo de 0,90 px entre
+regímenes dice que al menos uno de los dos arrastra cerca de un píxel de error,
+y sin referencia externa no se puede decidir cuál.
+
+---
+
+## Estructura
+
+```
+Detector/
+  Detector_v1.0.py … Detector_v1.7.py   las ocho versiones
+  DetectorFiltroKalman.py               filtro de Kalman, línea aparte
+  salida/                               9 CSV con los centros medidos
+Generador de videos/
+  generador.py                          generador sintético
+  simulacion_leds_*.mp4                 banco de pruebas controlado
+  video_real.mp4                        primer video real, etapa de 3 LEDs
+```
+
+Los nueve videos reales de prueba (320 MB) no están en el repositorio.
+
+### Evolución
+
+| Versión | Fecha | Qué agregó |
+|---|---|---|
+| 1.0 | nov 2025 | Diferencia de cuadros + HSV de reserva, centroide ponderado |
+| 1.1 | nov 2025 | Filtros de circularidad, fusión real de ambos métodos |
+| 1.2 | nov 2025 | Memoria persistente de la última posición válida |
+| 1.3 | dic 2025 | Filtro de Kalman por LED, asignación voraz, herramientas de inspección |
+| 1.4 | dic 2025 | Primer video real: gamma, HSV violeta, 3 filtros fijos. Se cae la diferencia de cuadros |
+| 1.5 | abr 2026 | Modelo geométrico del triángulo, calibración automática, inferencia del tercer vértice |
+| 1.6 | may 2026 | Cambio de objeto a 6 LEDs en línea. RANSAC, cuerpo rígido. Se cae el Kalman |
+| 1.7 | ago 2026 | Rediseño alrededor del parpadeo: 3 vías, 4 GDL, validación con abstención |
+
+---
+
+## Uso
+
+Requiere Python 3 con OpenCV y NumPy.
 
 ```bash
 pip install opencv-python numpy
 ```
 
-### Versiones probadas
-- Python 3.8+
-- OpenCV 4.5+
-- NumPy 1.20+
-
----
-
-## 🚀 Instrucciones de Uso
-
-### 1. Generar un video de prueba (opcional)
-
 ```bash
-cd "Generador de videos"
-python generador.py
+python3 Detector/Detector_v1.7.py                          # menú de videos, con ventana
+python3 Detector/Detector_v1.7.py video.mp4                # un video
+python3 Detector/Detector_v1.7.py --todos                  # todos, sin ventana
+python3 Detector/Detector_v1.7.py video.mp4 --csv out.csv  # exporta los centros
+python3 Detector/Detector_v1.7.py video.mp4 --grabar out.mp4
+python3 Detector/Detector_v1.7.py --carpeta "otra/carpeta" --todos
 ```
 
-Esto crea un video con 3 LEDs violeta que se mueven, rotan y parpadean sobre un fondo dinámico.
+Controles en modo ventana: `q`/`ESC` salir, `ESPACIO` pausa, `r` re-adquirir,
+`n`/`p` video siguiente y anterior, `+`/`-` velocidad, `0` velocidad original,
+`m` máscara, `d` diagnóstico por consola, `g` guardar el cuadro anotado.
 
-### 2. Ejecutar el detector
+### Formato del CSV
 
-```bash
-cd Detector
-python Detector_v1.4.py
-```
-
-### 3. Controles durante la ejecución
-
-| Tecla | Acción |
-|-------|--------|
-| `q` | Salir del programa |
+| Columna | Contenido |
+|---|---|
+| `frame` | Índice del cuadro, desde cero |
+| `t_seg` | Tiempo en segundos |
+| `estado` | `ACQ`, `LED`, `MOD`, `BAR`, `COAST` o `LOST` |
+| `espaciado_px` | Distancia entre LEDs contiguos. Vacío si no hubo solución |
+| `angulo_deg` | Ángulo de la fila respecto de la horizontal |
+| `contraste` | Diferencia de gris entre lentes y huecos |
+| `x0 … y5` | Los seis centros, con tres decimales. Vacíos en `COAST` y `LOST` |
 
 ---
 
-## 🔬 Versión Final: Detector_v1.4.py
+## Limitaciones conocidas
 
-### Descripción
+- **No hay verdad de referencia.** La exactitud absoluta no es verificable.
+- **El modelo asume que la fila se ve recta.** Los 4 GDL cubren traslación,
+  rotación en el plano y escala, pero no perspectiva. Una vista muy oblicua
+  rompería la uniformidad del espaciado.
+- **La cantidad de LEDs es un parámetro**, no algo que el detector deduzca.
+- **El régimen depende de la fase.** Si la fase queda alineada con el régimen
+  difícil durante todo un video, el sistema trabaja siempre en el peor caso.
+- **Las versiones anteriores no fueron medidas sobre el material nuevo.** La
+  comparación 23 % contra 93,6 % viene del encabezado del código de la v1.7, no
+  de una corrida reproducida.
 
-La versión 1.4 implementa un sistema robusto de tracking con:
+### Próximos pasos
 
-1. **Corrección Gamma** - Mejora el contraste para detectar LEDs tenues
-2. **Segmentación HSV** - Detección por color (violeta/magenta)
-3. **Filtro de Circularidad** - Descarta contornos no circulares
-4. **Filtro de Kalman (x3)** - Un filtro por cada LED para predicción de posición
-
-### Pipeline de Detección
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    PIPELINE DE DETECCIÓN                     │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│   Frame de entrada                                           │
-│         │                                                    │
-│         ▼                                                    │
-│   ┌─────────────┐                                            │
-│   │  Corrección │  ◄── Gamma = 1.3 (mejora contraste)        │
-│   │    Gamma    │                                            │
-│   └──────┬──────┘                                            │
-│          ▼                                                   │
-│   ┌─────────────┐                                            │
-│   │  Gaussian   │  ◄── Kernel 7x7 (reduce ruido)             │
-│   │    Blur     │                                            │
-│   └──────┬──────┘                                            │
-│          ▼                                                   │
-│   ┌─────────────┐                                            │
-│   │ Conversión  │                                            │
-│   │  BGR → HSV  │                                            │
-│   └──────┬──────┘                                            │
-│          ▼                                                   │
-│   ┌─────────────┐                                            │
-│   │  Máscara    │  ◄── H: 115-180, S: 40-255, V: 40-255      │
-│   │    HSV      │                                            │
-│   └──────┬──────┘                                            │
-│          ▼                                                   │
-│   ┌─────────────┐                                            │
-│   │  Encontrar  │                                            │
-│   │  Contornos  │                                            │
-│   └──────┬──────┘                                            │
-│          ▼                                                   │
-│   ┌─────────────┐                                            │
-│   │  Filtro de  │  ◄── circular_score > 0.18                 │
-│   │Circularidad │                                            │
-│   └──────┬──────┘                                            │
-│          ▼                                                   │
-│   ┌─────────────┐                                            │
-│   │  Cálculo    │  ◄── Momentos de imagen (subpíxel)         │
-│   │ Centroides  │                                            │
-│   └──────┬──────┘                                            │
-│          ▼                                                   │
-│   ┌─────────────────────────────────────┐                    │
-│   │      FILTRO DE KALMAN (x3)          │                    │
-│   │                                     │                    │
-│   │  Para cada LED:                     │                    │
-│   │  1. Predecir posición               │                    │
-│   │  2. Asignar detección más cercana   │                    │
-│   │  3. Corregir si hay detección       │                    │
-│   │     o mantener predicción           │                    │
-│   │                                     │                    │
-│   └─────────────────────────────────────┘                    │
-│                        │                                     │
-│                        ▼                                     │
-│              Posiciones de 3 LEDs                            │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Parámetros de Configuración
-
-Editar al inicio de `Detector_v1.4.py`:
-
-```python
-VIDEO_PATH = "../Generador de videos/video_real.mp4"  # Ruta al video
-GAMMA = 1.3              # Corrección de brillo (>1 = más claro)
-MAX_JUMP = 200           # Tolerancia predicción ↔ detección
-MAX_ASSIGN_DIST = 300    # Distancia máxima para asignar detección a LED
-
-# Rango HSV para detección de color (violeta/magenta)
-HSV_LOWER = np.array([115, 40, 40])
-HSV_UPPER = np.array([180, 255, 255])
-```
-
-### Ventanas de Visualización
-
-El detector muestra 3 ventanas simultáneas:
-
-| Ventana | Contenido |
-|---------|-----------|
-| **Crudo** | Frame original sin procesar |
-| **Mascara HSV** | Máscara binaria de detección por color |
-| **Tracking** | Resultado final con LEDs y triángulo |
-
-### Códigos de Color en Tracking
-
-| Color | Significado |
-|-------|-------------|
-| 🔴 Círculo rojo sólido | LED detectado (medición real) |
-| 🟡 Círculo amarillo vacío | LED predicho (no detectado en este frame) |
-| 🟢 Líneas verdes | Triángulo formado por los 3 LEDs |
-
----
-
-## 📹 Generador de Videos
-
-El script `generador.py` crea videos sintéticos con LEDs simulados.
-
-### Parámetros Configurables
-
-```python
-# Video
-FPS = 30                      # Frames por segundo
-DURACION_SEGUNDOS = 10        # Duración total
-ANCHO, ALTO = 640, 480        # Resolución
-
-# Fondo dinámico
-MIN_BRIGHTNESS = 50           # Brillo mínimo del fondo
-MAX_BRIGHTNESS = 220          # Brillo máximo del fondo
-PERIODO_FONDO_FRAMES = FPS*5  # Ciclo de variación del fondo
-
-# LEDs
-COLOR_LED_ON = (255, 0, 255)  # Violeta (BGR)
-COLOR_LED_OFF = (60, 60, 60)  # Gris oscuro
-RADIO_LED = 5                 # Radio en píxeles
-
-# Perspectiva
-ANGULO_VISION = 0.5           # 0 = frontal, 1 = casi perfil
-```
-
-### Frecuencias de Parpadeo
-
-El generador puede crear diferentes patrones de parpadeo modificando la lógica:
-
-```python
-# 15 Hz (1 frame ON / 1 frame OFF a 30 FPS)
-led_is_on = (frame_idx % 2) == 0
-
-# 1 Hz (15 frames ON / 15 frames OFF a 30 FPS)
-led_is_on = (frame_idx % 30) < 15
-
-# 3 ON / 3 OFF
-led_is_on = (frame_idx % 6) < 3
-```
-
-### Videos Incluidos
-
-| Archivo | Descripción |
-|---------|-------------|
-| `simulacion_leds_30fps.mp4` | Estándar 30 FPS |
-| `simulacion_leds_60fps.mp4` | Alta velocidad |
-| `simulacion_leds_120fps.mp4` | Muy alta velocidad |
-| `simulacion_leds_parpadeo.mp4` | Énfasis en parpadeo |
-| `simulacion_leds_fondo_dinamico.mp4` | Fondo con brillo variable |
-| `simulacion_leds_fondo_suave.mp4` | Variaciones suaves de fondo |
-| `simulacion_leds_ciclo_3on3off.mp4` | Ciclo 3 frames ON / 3 OFF |
-| `simulacion_leds_violeta_1hz.mp4` | Parpadeo lento (1 Hz) |
-| `simulacion_leds_violeta_15hz.mp4` | Parpadeo rápido (15 Hz) |
-| `simulacion_leds_vision.mp4` | Con efecto de perspectiva |
-| `video_real.mp4` | Captura real para pruebas |
-
----
-
-## 🔧 Filtro de Kalman - Detalles Técnicos
-
-### Modelo de Estado
-
-El filtro usa un modelo de **velocidad constante** con 4 variables:
-
-```
-Estado = [x, y, vx, vy]
-
-Donde:
-  x, y   = posición actual
-  vx, vy = velocidad (píxeles/frame)
-```
-
-### Matrices del Filtro
-
-```python
-# Matriz de Transición (asume dt = 1 frame)
-transitionMatrix = [
-    [1, 0, 1, 0],   # x_new = x + vx
-    [0, 1, 0, 1],   # y_new = y + vy
-    [0, 0, 1, 0],   # vx_new = vx
-    [0, 0, 0, 1]    # vy_new = vy
-]
-
-# Matriz de Medición (solo medimos posición)
-measurementMatrix = [
-    [1, 0, 0, 0],   # medimos x
-    [0, 1, 0, 0]    # medimos y
-]
-```
-
-### Ajuste de Ruidos
-
-| Parámetro | Valor | Efecto |
-|-----------|-------|--------|
-| `processNoiseCov` | 0.05 | Confianza en el modelo de movimiento |
-| `measurementNoiseCov` | 0.2 | Confianza en las mediciones |
-
-- **Mayor processNoiseCov** → Más reactivo a cambios bruscos
-- **Menor measurementNoiseCov** → Confía más en las detecciones
-
----
-
-## 📊 Evolución de Versiones
-
-| Versión | Características Principales |
-|---------|----------------------------|
-| **v1.0** | Detección híbrida: Parpadeo (diferencia de frames) + HSV fallback |
-| **v1.1** | Fusión de métodos, filtro de circularidad, centroide ponderado |
-| **v1.2** | Memoria persistente: usa última posición válida si falla detección |
-| **v1.3** | Filtro de Kalman, zoom dinámico suavizado, controles interactivos (n/b/p/r) |
-| **v1.4** | **Versión final**: Kalman optimizado, código simplificado, mejor rendimiento |
-
----
-
-## 🐛 Solución de Problemas
-
-### El detector no encuentra LEDs
-
-1. Verificar que `VIDEO_PATH` apunta al archivo correcto
-2. Ajustar `GAMMA` (aumentar si los LEDs son tenues)
-3. Modificar rangos `HSV_LOWER` y `HSV_UPPER` según el color de los LEDs
-
-### Tabla de referencia HSV por color
-
-| Color | H min | H max |
-|-------|-------|-------|
-| Rojo (bajo) | 0 | 10 |
-| Rojo (alto) | 170 | 180 |
-| Naranja | 10 | 25 |
-| Amarillo | 25 | 35 |
-| Verde | 35 | 85 |
-| Azul | 85 | 130 |
-| **Violeta/Magenta** | **115** | **180** |
-
-### Los trackers saltan entre LEDs
-
-- Reducir `MAX_ASSIGN_DIST` (ej: de 300 a 150)
-- Los LEDs pueden estar demasiado cerca entre sí
-
-### El seguimiento se pierde frecuentemente
-
-- Verificar que el parpadeo no es demasiado lento para el FPS del video
-- Ajustar los parámetros del Kalman para mayor tolerancia
-
----
-
-## 📝 Notas Adicionales
-
-- El sistema está optimizado para **3 LEDs** pero puede modificarse cambiando `num_leds`
-- Los videos de simulación usan color **violeta (BGR: 255, 0, 255)** por defecto
-- El detector v1.4 está preparado para usar cámara en vivo si `VIDEO_PATH = ""`
-
----
-
-## 👤 Autor
-
-Tiziano Bertorello
+1. Construir un conjunto etiquetado de referencia y versionarlo acá.
+2. Filmar a 60 fps o desincronizar el parpadeo. Eso elimina el problema en la
+   captura en vez de en el algoritmo, y es la mejora de mayor impacto por menor
+   esfuerzo.
+3. Resolver el sesgo de 0,90 px entre regímenes, que hoy es el mayor término de
+   error conocido.

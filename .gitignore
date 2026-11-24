@@ -1,0 +1,8 @@
+# Los videos reales de prueba no se publican: pesan ~320 MB y se filmaron
+# en una ubicacion concreta. Para reproducir los resultados hace falta
+# pedirlos aparte y dejarlos en esta carpeta.
+Videos de Prueba - Detección de Centros/
+Salidas v1.7/
+__pycache__/
+*.pyc
+.DS_Store
